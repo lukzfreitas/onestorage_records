@@ -1,0 +1,70 @@
+# Node.js with Angular
+# Build a Node.js project that uses Angular.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - Records
+
+stages:
+  - stage: Build
+    pool:
+      vmImage: "windows-latest"
+    jobs:
+      - job: Build
+        displayName: "React App Build"
+        workspace:
+          clean: all
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: "16.x"
+            displayName: "Install Node.js"
+
+          - task: Npm@1
+            inputs:
+              command: "install"
+              workingDir: "$(System.DefaultWorkingDirectory)/Records"
+            displayName: "Npm Install"
+
+          - task: Npm@1
+            inputs:
+              command: custom
+              customCommand: "run build:webpack"
+              workingDir: "$(System.DefaultWorkingDirectory)/Records"
+            displayName: "Build React app"
+
+          - script: |
+              mkdir $(Build.ArtifactStagingDirectory)\\dist
+              xcopy "$(System.DefaultWorkingDirectory)\\Records\\dist" $(Build.ArtifactStagingDirectory)\\dist /E/H/C
+            displayName: Copy dist contents
+
+          - task: PublishBuildArtifacts@1
+            displayName: "Publish Artifact"
+
+  - stage: Deploy
+    dependsOn: Build
+    condition: succeeded('Build')    
+    pool:
+      vmImage: "windows-latest"
+    jobs:
+      - deployment: Deploy
+        displayName: Deploy to Azure
+        environment: DEV
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: "Deploy React app"
+                  inputs:
+                    azureSubscription: REACT_AZURE_DEMO
+                    scriptType: batch
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az storage blob upload-batch --overwrite -d records-microapp --account-name REACT_AZURE_DEMO --account-key 8f9472b1-e471-4f89-be90-c97b0db3c077 -s "$(Agent.BuildDirectory)\\drop\\dist"
